@@ -1,13 +1,14 @@
 {
-  "name": "echonotes-backend",
+  "name": "creamail-backend",
   "version": "1.0.0",
-  "main": "index.js",
+  "type": "module",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "nodemailer": "^6.9.8",
+    "nodemailer": "^6.9.11",
     "@supabase/supabase-js": "^2.38.0"
   }
 }
