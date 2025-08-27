@@ -98,9 +98,15 @@ async function processOnce() {
   return { sent: sentCount };
 }
 
-// === Route Cron ===
-app.get("/", (req, res) => {
-  res.send("Backend Creamail is running 🚀");
+// Route Cron
+app.get("/cron/run", async (req, res) => {
+  try {
+    const result = await processOnce();
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("Cron error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // Démarrage du serveur
