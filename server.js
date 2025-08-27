@@ -35,6 +35,7 @@ function buildTransporter() {
 async function processOnce() {
   const now = new Date().toISOString();
 
+  // 🔹 On ne prend QUE les séquences prêtes ET pas déjà en cours
   const { data: sequences, error: seqError } = await supabaseAdmin
     .from("email_sequences")
     .select("*")
@@ -48,13 +49,41 @@ async function processOnce() {
   let sentCount = 0;
 
   for (const sequence of sequences) {
+    // 🔒 On verrouille immédiatement la séquence
+    const { error: lockError } = await supabaseAdmin
+      .from("email_sequences")
+      .update({ status: "sending" })
+      .eq("id", sequence.id)
+      .eq("status", "pending"); // évite les collisions si 2 workers tournent
+
+    if (lockError) {
+      console.error(`Lock error for seq #${sequence.id}:`, lockError.message);
+      continue;
+    }
+
+    // Double-check : si la séquence n'a pas été lockée (déjà prise ailleurs), on skip
+    const { data: lockedSeq } = await supabaseAdmin
+      .from("email_sequences")
+      .select("status")
+      .eq("id", sequence.id)
+      .single();
+
+    if (!lockedSeq || lockedSeq.status !== "sending") {
+      continue;
+    }
+
+    // 📩 On récupère les destinataires
     const { data: recipients, error: recError } = await supabaseAdmin
       .from("sequence_recipients")
       .select("to_email")
       .eq("sequence_id", sequence.id);
 
-    if (recError || !recipients?.length) continue;
+    if (recError || !recipients?.length) {
+      console.warn(`No recipients for seq #${sequence.id}`);
+      continue;
+    }
 
+    // 🚀 Envoi des mails
     for (const r of recipients) {
       const to = r.to_email;
       if (!to || !to.includes("@")) continue;
@@ -75,15 +104,18 @@ async function processOnce() {
           html,
         });
         sentCount++;
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise(r => setTimeout(r, 200)); // petit delay anti-spam
       } catch (e) {
         console.error("Send error to", to, e?.message);
       }
     }
 
-    // Gérer la récurrence
+    // 🗓️ Mise à jour récurrence ou fin
     if (sequence.recurrence === "once") {
-      await supabaseAdmin.from("email_sequences").update({ status: "completed" }).eq("id", sequence.id);
+      await supabaseAdmin
+        .from("email_sequences")
+        .update({ status: "completed" })
+        .eq("id", sequence.id);
     } else {
       const nextDate = calculateNextDate(sequence.scheduled_at, sequence.recurrence);
       if (nextDate) {
