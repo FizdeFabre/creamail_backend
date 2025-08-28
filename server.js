@@ -1,7 +1,14 @@
+import express from "express";
 import nodemailer from "nodemailer";
-import { supabaseAdmin } from "./lib/supabaseAdmin.js";
+import { createClient } from "@supabase/supabase-js";
 
-const BATCH_SIZE = 50;
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 function calculateNextDate(current, recurrence) {
   const d = new Date(current);
@@ -18,20 +25,17 @@ function calculateNextDate(current, recurrence) {
 function buildTransporter() {
   return nodemailer.createTransport({
     service: "gmail",
-    auth: { 
-      user: process.env.FROM_EMAIL, 
-      pass: process.env.EMAIL_PASS 
-    },
+    auth: { user: process.env.FROM_EMAIL, pass: process.env.EMAIL_PASS },
   });
 }
 
-export async function processOnce() {
+async function processOnce(batchSize = 50) {
   const now = new Date().toISOString();
 
-  // 1️⃣ Récupère les séquences prêtes
+  // On récupère les séquences prêtes
   const { data: sequences, error: seqError } = await supabaseAdmin
     .from("email_sequences")
-    .select("id, subject, body, recurrence, scheduled_at")
+    .select("*")
     .lte("scheduled_at", now)
     .eq("status", "pending");
 
@@ -42,7 +46,7 @@ export async function processOnce() {
   let sentCount = 0;
 
   for (const sequence of sequences) {
-    // 2️⃣ Verrouille la séquence
+    // Lock la séquence
     const { error: lockError } = await supabaseAdmin
       .from("email_sequences")
       .update({ status: "sending" })
@@ -51,7 +55,7 @@ export async function processOnce() {
 
     if (lockError) continue;
 
-    // 3️⃣ Récupère les destinataires
+    // Récupère les destinataires
     const { data: recipients, error: recError } = await supabaseAdmin
       .from("sequence_recipients")
       .select("to_email")
@@ -59,43 +63,41 @@ export async function processOnce() {
 
     if (recError || !recipients?.length) continue;
 
-    // 4️⃣ Envoie par batch
-    for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
-      const batch = recipients.slice(i, i + BATCH_SIZE);
+    // On envoie les mails par batch
+    for (let i = 0; i < recipients.length; i += batchSize) {
+      const batch = recipients.slice(i, i + batchSize);
 
       await Promise.all(batch.map(async r => {
         const to = r.to_email;
         if (!to?.includes("@")) return;
 
-        try {
-          // Insert log email envoyé
-          const { data: inserted } = await supabaseAdmin
-            .from("emails_sent")
-            .insert({ sequence_id: sequence.id, to_email: to })
-            .select()
-            .single();
+        const { data: inserted } = await supabaseAdmin
+          .from("emails_sent")
+          .insert({ sequence_id: sequence.id, to_email: to })
+          .select()
+          .single();
 
-          // Envoi mail
-          const html = `${sequence.body}<br><br><img src="https://tondomaine.com/api/open?id=${inserted.id}" width="1" height="1" />`;
+        if (!inserted) return;
+
+        const html = `${sequence.body}<br><img src="https://tondomaine.com/api/open?id=${inserted.id}" width="1" height="1" />`;
+
+        try {
           await transporter.sendMail({
             from: `"EchoNotes" <${process.env.FROM_EMAIL}>`,
             to,
             subject: sequence.subject,
             html,
           });
-
-          sentCount++;
         } catch (e) {
-          // Pas de log massif, juste un warning minimal
-          console.warn(`Failed sending to ${to}`);
+          console.error("Send error to", to);
         }
       }));
 
-      // Petit délai anti-spam / pour ne pas saturer Gmail
+      // Petite pause pour éviter de spammer Gmail
       await new Promise(r => setTimeout(r, 200));
     }
 
-    // 5️⃣ Mise à jour récurrence ou fin
+    // Mise à jour récurrence ou completion
     if (sequence.recurrence === "once") {
       await supabaseAdmin.from("email_sequences").update({ status: "completed" }).eq("id", sequence.id);
     } else {
@@ -104,7 +106,25 @@ export async function processOnce() {
         await supabaseAdmin.from("email_sequences").update({ scheduled_at: nextDate, status: "pending" }).eq("id", sequence.id);
       }
     }
+
+    sentCount += recipients.length;
   }
 
   return { sent: sentCount };
 }
+
+// Route Cron
+app.get("/cron/run", async (req, res) => {
+  try {
+    const result = await processOnce();
+    res.json({ ok: true, sent: result.sent });
+  } catch (err) {
+    console.error("Cron error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Serveur Express
+app.get("/", (req, res) => res.send("Backend EchoNotes OK 🚀"));
+
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
