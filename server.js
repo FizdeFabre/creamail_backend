@@ -1,5 +1,5 @@
 import express from "express";
-import { processOnce } from "./cronJob.js";
+import { processOnce } from "./cron.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
