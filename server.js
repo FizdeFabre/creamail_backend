@@ -37,30 +37,16 @@ function buildTransporter() {
  * Incrémente une date ISO UTC selon une récurrence donnée.
  * Garantit que le résultat est STRICTEMENT dans le futur vs nowUTC.
  */
-function calculateNextDate(scheduledAtISO, recurrence) {
-  if (!scheduledAtISO) return null;
-  const inc = (d) => {
-    switch (recurrence) {
-      case "daily":   d.setUTCDate(d.getUTCDate() + 1); break;
-      case "weekly":  d.setUTCDate(d.getUTCDate() + 7); break;
-      case "monthly": d.setUTCMonth(d.getUTCMonth() + 1); break;
-      case "yearly":  d.setUTCFullYear(d.getUTCFullYear() + 1); break;
-      default: return null;
-    }
-    return d;
-  };
-
-  const now = new Date(); // UTC by toISOString reference
-  let next = new Date(scheduledAtISO);
-  if (Number.isNaN(next.getTime())) return null;
-
-  // Si la date est déjà passée (ou égale), on push jusqu'à dépasser "now"
-  while (next <= now) {
-    const bumped = inc(next);
-    if (!bumped) return null;
-    next = bumped;
+function calculateNextDateUTC(current, recurrence) {
+  const d = new Date(current); // current est déjà UTC
+  switch(recurrence) {
+    case "daily": d.setUTCDate(d.getUTCDate() + 1); break;
+    case "weekly": d.setUTCDate(d.getUTCDate() + 7); break;
+    case "monthly": d.setUTCMonth(d.getUTCMonth() + 1); break;
+    case "yearly": d.setUTCFullYear(d.getUTCFullYear() + 1); break;
+    default: return null;
   }
-  return next.toISOString();
+  return d.toISOString();
 }
 
 // ─────────────────────────────────────────────────────────────
