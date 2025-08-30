@@ -1,19 +1,179 @@
 import express from "express";
-import { processOnce } from "./cron.js";
+import nodemailer from "nodemailer";
+import { createClient } from "@supabase/supabase-js";
 
+// --- Config ---
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+// --- Utils ---
+function calculateNextDate(current, recurrence) {
+  const d = new Date(current);
+  switch (recurrence) {
+    case "daily":   d.setUTCDate(d.getUTCDate() + 1); break;
+    case "weekly":  d.setUTCDate(d.getUTCDate() + 7); break;
+    case "monthly": d.setUTCMonth(d.getUTCMonth() + 1); break;
+    case "yearly":  d.setUTCFullYear(d.getUTCFullYear() + 1); break;
+    default: return null;
+  }
+  return d.toISOString();
+}
+
+function buildTransporter() {
+  return nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.FROM_EMAIL,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
+}
+
+// --- Cron job logic ---
+async function processOnce(batchSize = 50) {
+  const now = new Date().toISOString();
+  console.log("🔹 CRON START", now);
+
+  const { data: sequences, error: seqError } = await supabaseAdmin
+    .from("email_sequences")
+    .select("*")
+    .lte("scheduled_at", now)
+    .eq("status", "pending");
+
+  if (seqError) {
+    console.error("❌ Fetch sequences error:", seqError.message);
+    return { sent: 0, error: seqError.message };
+  }
+
+  console.log("📬 Sequences found:", sequences?.length || 0);
+  if (!sequences?.length) return { sent: 0, info: "No sequences to send" };
+
+  const transporter = buildTransporter();
+  let sentCount = 0;
+
+  for (const sequence of sequences) {
+    console.log("➡️ Processing sequence:", sequence.id, sequence.subject);
+
+    // Lock
+    const { error: lockError } = await supabaseAdmin
+      .from("email_sequences")
+      .update({ status: "sending" })
+      .eq("id", sequence.id)
+      .eq("status", "pending");
+
+    if (lockError) {
+      console.warn("⚠️ Could not lock sequence:", sequence.id, lockError.message);
+      continue;
+    }
+
+    const { data: recipients, error: recError } = await supabaseAdmin
+      .from("sequence_recipients")
+      .select("to_email")
+      .eq("sequence_id", sequence.id);
+
+    if (recError) {
+      console.warn("⚠️ Recipients fetch error:", recError.message);
+      continue;
+    }
+
+    console.log("👥 Recipients found:", recipients?.length || 0);
+
+    for (let i = 0; i < (recipients?.length || 0); i += batchSize) {
+      const batch = recipients.slice(i, i + batchSize);
+
+      await Promise.all(batch.map(async (r) => {
+        const to = r.to_email;
+        if (!to?.includes("@")) return;
+
+        console.log(`✉️ Sending to: ${to}`);
+
+        const { data: inserted, error: insErr } = await supabaseAdmin
+          .from("emails_sent")
+          .insert({ sequence_id: sequence.id, to_email: to })
+          .select()
+          .single();
+
+        if (insErr || !inserted) {
+          console.warn("⚠️ Failed to log email for:", to, insErr?.message);
+          return;
+        }
+
+        const pixelUrl = `https://tondomaine.com/api/open?id=${inserted.id}`;
+        const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" />`;
+
+        try {
+          const info = await transporter.sendMail({
+            from: `"EchoNotes" <${process.env.FROM_EMAIL}>`,
+            to,
+            subject: sequence.subject,
+            html,
+          });
+          console.log("✅ Mail sent:", info.messageId);
+          sentCount++;
+        } catch (e) {
+          console.error("❌ Mail send error to", to, e?.message);
+        }
+      }));
+
+      await new Promise((r) => setTimeout(r, 200)); // pause anti-spam
+    }
+
+    // Update recurrence
+    if (sequence.recurrence === "once") {
+      await supabaseAdmin.from("email_sequences")
+        .update({ status: "completed" })
+        .eq("id", sequence.id);
+      console.log("🟢 Sequence completed:", sequence.id);
+    } else {
+      const nextDate = calculateNextDate(sequence.scheduled_at, sequence.recurrence);
+      if (nextDate) {
+        await supabaseAdmin
+          .from("email_sequences")
+          .update({ scheduled_at: nextDate, status: "pending" })
+          .eq("id", sequence.id);
+        console.log("🌀 Sequence rescheduled:", nextDate);
+      }
+    }
+  }
+
+  console.log("📈 CRON END, total emails sent:", sentCount);
+  return { sent: sentCount };
+}
+
+// --- Routes ---
 app.get("/", (req, res) => res.send("Backend EchoNotes OK 🚀"));
 
 app.get("/cron/run", async (req, res) => {
   try {
     const result = await processOnce();
-    res.json({ ok: true, sent: result.sent });
+    res.json({ ok: true, ...result });
   } catch (err) {
     console.error("Cron error:", err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+app.get("/testmail", async (req, res) => {
+  try {
+    const transporter = buildTransporter();
+    const info = await transporter.sendMail({
+      from: `"EchoNotes Test" <${process.env.FROM_EMAIL}>`,
+      to: process.env.TEST_EMAIL,
+      subject: "✅ Test Email from EchoNotes",
+      text: "Coucou, ton backend fonctionne 🎉",
+    });
+    console.log("✅ Test mail sent:", info.messageId);
+    res.json({ ok: true, messageId: info.messageId });
+  } catch (err) {
+    console.error("❌ Test mail error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// --- Start server ---
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
