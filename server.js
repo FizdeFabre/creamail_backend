@@ -6,6 +6,8 @@ import { createClient } from "@supabase/supabase-js";
 const app = express();
 const PORT = process.env.PORT || 3000;
 const CRON_KEY = process.env.CRON_KEY;
+const pixelUrl = `https://tondomaine.com/api/open?id=${inserted.id}`;
+const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" />`;
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -177,4 +179,36 @@ app.get("/testmail", async (req, res) => {
 });
 
 // --- Start server ---
+app.get("/api/open", async (req, res) => {
+  const id = req.query.id;
+
+  if (!id) {
+    return res.status(400).send("Missing email id");
+  }
+
+  try {
+    // Mettre à jour l'email comme ouvert
+    const { error } = await supabaseAdmin
+      .from("emails_sent")
+      .update({ opened: true })
+      .eq("id", id);
+
+    if (error) {
+      console.error("❌ Error updating opened:", error.message);
+      return res.status(500).send("DB error");
+    }
+
+    // Envoyer un pixel transparent
+    res.set("Content-Type", "image/png");
+    const pixel = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8HwQACfsD/QkEZHcAAAAASUVORK5CYII=",
+      "base64"
+    );
+    res.send(pixel);
+  } catch (e) {
+    console.error("❌ Pixel route error:", e.message);
+    res.status(500).send("Server error");
+  }
+});
+
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

@@ -1,6 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 
+import { createClient } from "@supabase/supabase-js";
+import nodemailer from "nodemailer";
+
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -9,10 +12,10 @@ const supabaseAdmin = createClient(
 function calculateNextDate(current, recurrence) {
   const d = new Date(current);
   switch (recurrence) {
-    case "daily":   d.setUTCDate(d.getUTCDate() + 1); break;
-    case "weekly":  d.setUTCDate(d.getUTCDate() + 7); break;
+    case "daily": d.setUTCDate(d.getUTCDate() + 1); break;
+    case "weekly": d.setUTCDate(d.getUTCDate() + 7); break;
     case "monthly": d.setUTCMonth(d.getUTCMonth() + 1); break;
-    case "yearly":  d.setUTCFullYear(d.getUTCFullYear() + 1); break;
+    case "yearly": d.setUTCFullYear(d.getUTCFullYear() + 1); break;
     default: return null;
   }
   return d.toISOString();
@@ -21,11 +24,14 @@ function calculateNextDate(current, recurrence) {
 function buildTransporter() {
   return nodemailer.createTransport({
     service: "gmail",
-    auth: { user: process.env.FROM_EMAIL, pass: process.env.EMAIL_PASS },
+    auth: { 
+      user: process.env.FROM_EMAIL, 
+      pass: process.env.EMAIL_PASS 
+    },
   });
 }
 
-export default async function handler(req, res) {
+export async function GET() {
   try {
     const now = new Date().toISOString();
     const { data: sequences } = await supabaseAdmin
@@ -34,7 +40,9 @@ export default async function handler(req, res) {
       .lte("scheduled_at", now)
       .eq("status", "pending");
 
-    if (!sequences?.length) return res.json({ sent: 0, info: "No sequences" });
+    if (!sequences?.length) {
+      return new Response(JSON.stringify({ sent: 0, info: "No sequences" }), { status: 200 });
+    }
 
     const transporter = buildTransporter();
     let sentCount = 0;
@@ -61,16 +69,22 @@ export default async function handler(req, res) {
 
       // Update sequence status
       if (sequence.recurrence === "once") {
-        await supabaseAdmin.from("email_sequences").update({ status: "completed" }).eq("id", sequence.id);
+        await supabaseAdmin
+          .from("email_sequences")
+          .update({ status: "completed" })
+          .eq("id", sequence.id);
       } else {
         const nextDate = calculateNextDate(sequence.scheduled_at, sequence.recurrence);
-        await supabaseAdmin.from("email_sequences").update({ scheduled_at: nextDate, status: "pending" }).eq("id", sequence.id);
+        await supabaseAdmin
+          .from("email_sequences")
+          .update({ scheduled_at: nextDate, status: "pending" })
+          .eq("id", sequence.id);
       }
     }
 
-    res.json({ ok: true, sent: sentCount });
+    return new Response(JSON.stringify({ ok: true, sent: sentCount }), { status: 200 });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ ok: false, error: err.message });
+    return new Response(JSON.stringify({ ok: false, error: err.message }), { status: 500 });
   }
 }
