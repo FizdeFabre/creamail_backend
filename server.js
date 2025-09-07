@@ -6,8 +6,6 @@ import { createClient } from "@supabase/supabase-js";
 const app = express();
 const PORT = process.env.PORT || 3000;
 const CRON_KEY = process.env.CRON_KEY;
-const pixelUrl = `https://tondomaine.com/api/open?id=${inserted.id}`;
-const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" />`;
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
