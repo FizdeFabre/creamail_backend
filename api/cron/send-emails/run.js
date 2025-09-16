@@ -1,9 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 
-import { createClient } from "@supabase/supabase-js";
-import nodemailer from "nodemailer";
-
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -34,12 +31,15 @@ function buildTransporter() {
 export async function GET() {
   try {
     const now = new Date().toISOString();
-    const { data: sequences } = await supabaseAdmin
+
+    // 1. Récupérer les séquences prêtes
+    const { data: sequences, error: seqErr } = await supabaseAdmin
       .from("email_sequences")
       .select("*")
       .lte("scheduled_at", now)
       .eq("status", "pending");
 
+    if (seqErr) throw new Error(seqErr.message);
     if (!sequences?.length) {
       return new Response(JSON.stringify({ sent: 0, info: "No sequences" }), { status: 200 });
     }
@@ -47,27 +47,42 @@ export async function GET() {
     const transporter = buildTransporter();
     let sentCount = 0;
 
-    for (const sequence of sequences) {
-      const { data: recipients } = await supabaseAdmin
+    for (const sequence of sequences) { 
+      // 2. Récupérer les destinataires
+      const { data: recipients, error: recErr } = await supabaseAdmin
         .from("sequence_recipients")
         .select("to_email")
         .eq("sequence_id", sequence.id);
 
-      for (const r of recipients || []) {
-        try {
-          await transporter.sendMail({
-            from: `"EchoNotes" <${process.env.FROM_EMAIL}>`,
-            to: r.to_email,
-            subject: sequence.subject,
-            html: sequence.body,
-          });
-          sentCount++;
-        } catch (e) {
-          console.error("Mail error:", e.message);
-        }
-      }
+      if (recErr) throw new Error(recErr.message);
+      if (!recipients?.length) continue;
 
-      // Update sequence status
+      try {
+  await transporter.sendMail({ from, to, subject, html });
+  
+  // Après envoi, enregistrer le mail envoyé
+  const { data: inserted } = await supabaseAdmin
+    .from("emails_sent")
+    .insert({
+      sequence_id: sequence.id,
+      to_email: to,
+      sent_at: new Date().toISOString(),
+      opened: false,
+      clicked: false,
+      responded: false,
+      variant: "A"
+    })
+    .select()
+    .single();
+
+  if (!inserted) console.error("Failed to insert sent email for", to);
+
+  sentCount++;
+} catch (e) {
+  console.error("Mail error:", e.message);
+}
+
+      // 5. Reschedule / complete
       if (sequence.recurrence === "once") {
         await supabaseAdmin
           .from("email_sequences")
@@ -75,16 +90,18 @@ export async function GET() {
           .eq("id", sequence.id);
       } else {
         const nextDate = calculateNextDate(sequence.scheduled_at, sequence.recurrence);
-        await supabaseAdmin
-          .from("email_sequences")
-          .update({ scheduled_at: nextDate, status: "pending" })
-          .eq("id", sequence.id);
+        if (nextDate) {
+          await supabaseAdmin
+            .from("email_sequences")
+            .update({ scheduled_at: nextDate, status: "pending" })
+            .eq("id", sequence.id);
+        }
       }
     }
 
     return new Response(JSON.stringify({ ok: true, sent: sentCount }), { status: 200 });
   } catch (err) {
-    console.error(err);
+    console.error("❌ Cron error:", err.message);
     return new Response(JSON.stringify({ ok: false, error: err.message }), { status: 500 });
   }
 }

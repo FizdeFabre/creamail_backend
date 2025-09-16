@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { supabaseAdmin } from "./lib/supabaseAdmin.js";
+import { randomUUID } from "crypto";  // génère un ID unique avant insertion
 
 function calculateNextDate(current, recurrence) {
   const d = new Date(current);
@@ -18,7 +19,7 @@ function buildTransporter() {
     service: "gmail",
     auth: { 
       user: process.env.FROM_EMAIL, 
-      pass: process.env.EMAIL_PASS   // ⚠️ mot de passe d’application Gmail
+      pass: process.env.EMAIL_PASS // ⚠️ mot de passe d’application Gmail
     },
   });
 }
@@ -62,25 +63,41 @@ export async function processOnce(batchSize = 50) {
         const to = r.to_email;
         if (!to?.includes("@")) return;
 
-        const { data: inserted } = await supabaseAdmin
-          .from("emails_sent")
-          .insert({ sequence_id: sequence.id, to_email: to })
-          .select()
-          .single();
+        // ⚡ Génère un ID unique pour l'email
+        const emailId = randomUUID();
 
-        if (!inserted) return;
-
-        const pixelUrl = `https://tondomaine.com/api/open?id=${inserted.id}`;
-        const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" />`;
+        // Pixel tracker basé sur l’ID
+        const pixelUrl = `${process.env.NEXT_PUBLIC_BASE_URL}/api/open?id=${emailId}`;
+        const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" style="display:none;" />`;
 
         try {
+          // 1️⃣ Envoi du mail
           await transporter.sendMail({
             from: `"EchoNotes" <${process.env.FROM_EMAIL}>`,
             to,
             subject: sequence.subject,
             html,
           });
-          sentCount++;
+
+          // 2️⃣ Si succès → insérer en DB
+          const { error: insertError } = await supabaseAdmin
+            .from("emails_sent")
+            .insert({
+              id: emailId,          // on impose l’UUID
+              sequence_id: sequence.id,
+              to_email: to,
+              sent_at: new Date().toISOString(),
+              opened: false,
+              clicked: false,
+              responded: false,
+              variant: "A",
+            });
+
+          if (insertError) {
+            console.error("Insert error for", to, insertError.message);
+          } else {
+            sentCount++;
+          }
         } catch (e) {
           console.error("Mail error:", e.message);
         }

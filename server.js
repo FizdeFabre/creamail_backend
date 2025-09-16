@@ -101,8 +101,8 @@ async function processOnce(batchSize = 50) {
           console.warn("⚠️ Failed to log email for:", to, insErr?.message);
           return;
         }
-
-        const pixelUrl = `https://tondomaine.com/api/open?id=${inserted.id}`;
+const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+const pixelUrl = `${process.env.NEXT_PUBLIC_SITE_URL}/api/open?id=${inserted.id}`;
         const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" />`;
 
         try {
