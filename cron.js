@@ -1,6 +1,5 @@
 import nodemailer from "nodemailer";
 import { supabaseAdmin } from "./lib/supabaseAdmin.js";
-import { randomUUID } from "crypto";  // génère un ID unique avant insertion
 
 function calculateNextDate(current, recurrence) {
   const d = new Date(current);
@@ -19,7 +18,7 @@ function buildTransporter() {
     service: "gmail",
     auth: { 
       user: process.env.FROM_EMAIL, 
-      pass: process.env.EMAIL_PASS // ⚠️ mot de passe d’application Gmail
+      pass: process.env.EMAIL_PASS 
     },
   });
 }
@@ -27,6 +26,7 @@ function buildTransporter() {
 export async function processOnce(batchSize = 50) {
   const now = new Date().toISOString();
 
+  // 👉 récupérer les séquences prêtes
   const { data: sequences, error: seqError } = await supabaseAdmin
     .from("email_sequences")
     .select("*")
@@ -40,19 +40,25 @@ export async function processOnce(batchSize = 50) {
   let sentCount = 0;
 
   for (const sequence of sequences) {
-    // 🔒 Lock
+    console.log("➡️ Processing sequence:", sequence.sequence_id);
+
+    // 🔒 Lock sur sequence_id au lieu de id
     const { error: lockError } = await supabaseAdmin
       .from("email_sequences")
       .update({ status: "sending" })
-      .eq("sequence_id", sequence.id)
+      .eq("sequence_id", sequence.sequence_id)
       .eq("status", "pending");
 
-    if (lockError) continue;
+    if (lockError) {
+      console.error("⚠️ Could not lock sequence:", lockError.message);
+      continue;
+    }
 
+    // 👉 Destinataires
     const { data: recipients } = await supabaseAdmin
       .from("sequence_recipients")
       .select("to_email")
-      .eq("sequence_id", sequence.id);
+      .eq("sequence_id", sequence.sequence_id);
 
     if (!recipients?.length) continue;
 
@@ -63,62 +69,62 @@ export async function processOnce(batchSize = 50) {
         const to = r.to_email;
         if (!to?.includes("@")) return;
 
-        // ⚡ Génère un ID unique pour l'email
-        const emailId = randomUUID();
+        // 👉 insérer l'email envoyé
+        const { data: inserted, error: insertError } = await supabaseAdmin
+          .from("emails_sent")
+          .insert({
+            sequence_id: sequence.sequence_id,
+            to_email: to,
+            sent_at: new Date().toISOString(),
+            opened: false,
+            clicked: false,
+            responded: false,
+            variant: "A"
+          })
+          .select()
+          .single();
 
-        // Pixel tracker basé sur l’ID
-        const pixelUrl = `${process.env.NEXT_PUBLIC_BASE_URL}/api/open?id=${emailId}`;
+        if (insertError) {
+          console.error("❌ Failed to insert sent email:", insertError.message);
+          return;
+        }
+
+        const pixelUrl = `${process.env.NEXT_PUBLIC_BASE_URL}/api/open?id=${inserted.id}`;
         const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" style="display:none;" />`;
 
         try {
-          // 1️⃣ Envoi du mail
           await transporter.sendMail({
             from: `"EchoNotes" <${process.env.FROM_EMAIL}>`,
             to,
             subject: sequence.subject,
             html,
           });
-
-          // 2️⃣ Si succès → insérer en DB
-          const { error: insertError } = await supabaseAdmin
-            .from("emails_sent")
-            .insert({
-              id: emailId,          // on impose l’UUID
-              sequence_id: sequence.id,
-              to_email: to,
-              sent_at: new Date().toISOString(),
-              opened: false,
-              clicked: false,
-              responded: false,
-              variant: "A",
-            });
-
-          if (insertError) {
-            console.error("Insert error for", to, insertError.message);
-          } else {
-            sentCount++;
-          }
+          sentCount++;
         } catch (e) {
           console.error("Mail error:", e.message);
         }
       }));
 
-      await new Promise(r => setTimeout(r, 200)); // pause anti-spam
+      await new Promise(r => setTimeout(r, 200)); // throttle anti-spam
     }
 
     // 🌀 Update récurrence
     if (sequence.recurrence === "once") {
-      await supabaseAdmin.from("email_sequences").update({ status: "completed" }).eq("sequence_id", sequence.id);
+      await supabaseAdmin
+        .from("email_sequences")
+        .update({ status: "completed" })
+        .eq("sequence_id", sequence.sequence_id);
     } else {
       const nextDate = calculateNextDate(sequence.scheduled_at, sequence.recurrence);
       if (nextDate) {
         await supabaseAdmin
           .from("email_sequences")
           .update({ scheduled_at: nextDate, status: "pending" })
-          .eq("sequence_id", sequence.id);
+          .eq("sequence_id", sequence.sequence_id);
       }
     }
   }
 
+  console.log("📈 CRON END, total emails sent:", sentCount);
   return { sent: sentCount };
 }
