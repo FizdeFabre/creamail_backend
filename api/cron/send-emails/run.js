@@ -58,29 +58,19 @@ export async function GET() {
       if (!recipients?.length) continue;
 
       try {
-  await transporter.sendMail({ from, to, subject, html });
+    await transporter.sendMail({ from, to, subject, html });
   
-  // Après envoi, enregistrer le mail envoyé
-  const { data: inserted } = await supabaseAdmin
-    .from("emails_sent")
-    .insert({
-      sequence_id: sequence.id,
-      to_email: to,
-      sent_at: new Date().toISOString(),
-      opened: false,
-      clicked: false,
-      responded: false,
-      variant: "A"
-    })
-    .select()
-    .single();
+    // ❌ Supprimer tout ce bloc d'insert dans emails_sent
+    // const { data: inserted } = await supabaseAdmin
+    //   .from("emails_sent")
+    //   .insert({...})
+    //   .select()
+    //   .single();
 
-  if (!inserted) console.error("Failed to insert sent email for", to);
-
-  sentCount++;
-} catch (e) {
-  console.error("Mail error:", e.message);
-}
+    sentCount++;
+  } catch (e) {
+    console.error("Mail error:", e.message);
+  }
 
       // 5. Reschedule / complete
       if (sequence.recurrence === "once") {
