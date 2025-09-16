@@ -32,7 +32,7 @@ export async function GET() {
   try {
     const now = new Date().toISOString();
 
-    // 1. Récupérer les séquences prêtes
+    // 👉 Récupérer les séquences prêtes
     const { data: sequences, error: seqErr } = await supabaseAdmin
       .from("email_sequences")
       .select("*")
@@ -48,7 +48,9 @@ export async function GET() {
     let sentCount = 0;
 
     for (const sequence of sequences) { 
-      // 2. Récupérer les destinataires
+      console.log("➡️ Processing sequence:", sequence.sequence_id);
+
+      // 👉 Récupérer les destinataires
       const { data: recipients, error: recErr } = await supabaseAdmin
         .from("sequence_recipients")
         .select("to_email")
@@ -57,16 +59,49 @@ export async function GET() {
       if (recErr) throw new Error(recErr.message);
       if (!recipients?.length) continue;
 
-      try {
-    await transporter.sendMail({ from, to, subject, html });
+      for (const r of recipients) {
+        const to = r.to_email;
+        if (!to?.includes("@")) continue;
 
+        // 👉 Insérer l'email dans emails_sent
+        const { data: inserted, error: insertErr } = await supabaseAdmin
+          .from("emails_sent")
+          .insert({
+            sequence_id: sequence.sequence_id,
+            to_email: to,
+            sent_at: new Date().toISOString(),
+            opened: false,
+            clicked: false,
+            responded: false,
+            variant: "A"
+          })
+          .select()
+          .single();
 
-    sentCount++;
-  } catch (e) {
-    console.error("Mail error:", e.message);
-  }
+        if (insertErr) {
+          console.error("❌ Insert failed:", insertErr.message);
+          continue;
+        }
 
-      // 5. Reschedule / complete
+        // 👉 Pixel tracker
+        const pixelUrl = `${process.env.NEXT_PUBLIC_BASE_URL}/api/open?id=${inserted.id}`;
+        const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" style="display:none;" />`;
+
+        // 👉 Envoyer le mail
+        try {
+          await transporter.sendMail({
+            from: `"EchoNotes" <${process.env.FROM_EMAIL}>`,
+            to,
+            subject: sequence.subject,
+            html,
+          });
+          sentCount++;
+        } catch (e) {
+          console.error("Mail error:", e.message);
+        }
+      }
+
+      // 👉 Update récurrence
       if (sequence.recurrence === "once") {
         await supabaseAdmin
           .from("email_sequences")
@@ -83,9 +118,11 @@ export async function GET() {
       }
     }
 
+    console.log("📈 CRON END, total emails sent:", sentCount);
     return new Response(JSON.stringify({ ok: true, sent: sentCount }), { status: 200 });
   } catch (err) {
     console.error("❌ Cron error:", err.message);
     return new Response(JSON.stringify({ ok: false, error: err.message }), { status: 500 });
   }
-}
+}63
+66
