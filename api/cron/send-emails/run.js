@@ -59,13 +59,7 @@ export async function GET() {
 
       try {
     await transporter.sendMail({ from, to, subject, html });
-  
-    // ❌ Supprimer tout ce bloc d'insert dans emails_sent
-    // const { data: inserted } = await supabaseAdmin
-    //   .from("emails_sent")
-    //   .insert({...})
-    //   .select()
-    //   .single();
+
 
     sentCount++;
   } catch (e) {
@@ -77,14 +71,14 @@ export async function GET() {
         await supabaseAdmin
           .from("email_sequences")
           .update({ status: "completed" })
-          .eq("id", sequence.id);
+          .eq("sequence_id", sequence.id);
       } else {
         const nextDate = calculateNextDate(sequence.scheduled_at, sequence.recurrence);
         if (nextDate) {
           await supabaseAdmin
             .from("email_sequences")
             .update({ scheduled_at: nextDate, status: "pending" })
-            .eq("id", sequence.id);
+            .eq("sequence_id", sequence.id);
         }
       }
     }

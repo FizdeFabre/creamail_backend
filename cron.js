@@ -44,7 +44,7 @@ export async function processOnce(batchSize = 50) {
     const { error: lockError } = await supabaseAdmin
       .from("email_sequences")
       .update({ status: "sending" })
-      .eq("id", sequence.id)
+      .eq("sequence_id", sequence.id)
       .eq("status", "pending");
 
     if (lockError) continue;
@@ -108,14 +108,14 @@ export async function processOnce(batchSize = 50) {
 
     // 🌀 Update récurrence
     if (sequence.recurrence === "once") {
-      await supabaseAdmin.from("email_sequences").update({ status: "completed" }).eq("id", sequence.id);
+      await supabaseAdmin.from("email_sequences").update({ status: "completed" }).eq("sequence_id", sequence.id);
     } else {
       const nextDate = calculateNextDate(sequence.scheduled_at, sequence.recurrence);
       if (nextDate) {
         await supabaseAdmin
           .from("email_sequences")
           .update({ scheduled_at: nextDate, status: "pending" })
-          .eq("id", sequence.id);
+          .eq("sequence_id", sequence.id);
       }
     }
   }
