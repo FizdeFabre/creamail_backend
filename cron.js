@@ -40,13 +40,13 @@ export async function processOnce(batchSize = 50) {
   let sentCount = 0;
 
   for (const sequence of sequences) {
-    console.log("➡️ Processing sequence:", sequence_id);
+    console.log("➡️ Processing sequence:", sequence.sequence_id);
 
     // 🔒 Lock sur sequence_id au lieu de id
     const { error: lockError } = await supabaseAdmin
       .from("email_sequences")
       .update({ status: "sending" })
-      .eq("sequence_id", sequence_id)
+      .eq("sequence_id", sequence.sequence_id)
       .eq("status", "pending");
 
     if (lockError) {
@@ -58,7 +58,7 @@ export async function processOnce(batchSize = 50) {
     const { data: recipients } = await supabaseAdmin
       .from("sequence_recipients")
       .select("to_email")
-      .eq("sequence_id", sequence_id);
+      .eq("sequence_id", sequence.sequence_id);
 
     if (!recipients?.length) continue;
 
@@ -73,14 +73,14 @@ export async function processOnce(batchSize = 50) {
         const { data: inserted, error: insertError } = await supabaseAdmin
           .from("emails_sent")
           .insert({
-            sequence_id: sequence_id,
-            to_email: to,
-            sent_at: new Date().toISOString(),
-            opened: false,
-            clicked: false,
-            responded: false,
-            variant: "A"
-          })
+  sequence_id: sequence.sequence_id,
+  to_email: to,
+  sent_at: new Date().toISOString(),
+  opened: false,
+  clicked: false,
+  responded: false,
+  variant: "A"
+})
           .select()
           .single();
 
@@ -113,14 +113,14 @@ export async function processOnce(batchSize = 50) {
       await supabaseAdmin
         .from("email_sequences")
         .update({ status: "completed" })
-        .eq("sequence_id", sequence_id);
+        .eq("sequence_id", sequence.sequence_id);
     } else {
       const nextDate = calculateNextDate(sequence.scheduled_at, sequence.recurrence);
       if (nextDate) {
         await supabaseAdmin
           .from("email_sequences")
           .update({ scheduled_at: nextDate, status: "pending" })
-          .eq("sequence_id", sequence_id);
+          .eq("sequence_id", sequence.sequence_id);
       }
     }
   }

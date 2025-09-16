@@ -52,7 +52,7 @@ export async function GET() {
       const { data: recipients, error: recErr } = await supabaseAdmin
         .from("sequence_recipients")
         .select("to_email")
-        .eq("sequence_id", sequence.id);
+        .eq("sequence_id", sequence.sequence_id);
 
       if (recErr) throw new Error(recErr.message);
       if (!recipients?.length) continue;
@@ -71,14 +71,14 @@ export async function GET() {
         await supabaseAdmin
           .from("email_sequences")
           .update({ status: "completed" })
-          .eq("sequence_id", sequence.id);
+          .eq("sequence_id", sequence.sequence_id);
       } else {
         const nextDate = calculateNextDate(sequence.scheduled_at, sequence.recurrence);
         if (nextDate) {
           await supabaseAdmin
             .from("email_sequences")
             .update({ scheduled_at: nextDate, status: "pending" })
-            .eq("sequence_id", sequence.id);
+            .eq("sequence_id", sequence.sequence_id);
         }
       }
     }
