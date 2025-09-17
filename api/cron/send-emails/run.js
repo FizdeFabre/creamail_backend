@@ -121,7 +121,14 @@ export async function GET() {
       }
     }
 
-    console.log("📈 CRON END, total emails sent:", sentCount);
+    const { data, error } = await supabaseAdmin
+  .from("email_sequences")
+  .select("*")
+  .limit(1);
+
+console.log(data, error);
+
+    console.log("📈 CRON END TEST GROS FILS DE PUTE, total emails sent:", sentCount);
     return new Response(JSON.stringify({ ok: true, sent: sentCount }), { status: 200 });
   } catch (err) {
     console.error("❌ Cron error:", err.message);
