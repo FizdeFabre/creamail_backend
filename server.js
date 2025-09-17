@@ -95,7 +95,6 @@ async function processOnce(batchSize = 50) {
           .from("emails_sent")
           .insert({
             sequence_id: sequence.sequence_id,
-            to_email: to,
             sent_at: new Date().toISOString(),
             opened: false,
             clicked: false,
