@@ -40,8 +40,7 @@ export async function processOnce(batchSize = 50) {
   let sentCount = 0;
 
   for (const sequence of sequences) {
-    console.log("➡️ Processing sequence:", sequence.sequence_id);
-
+    console.log("🎯 Sequence object:", sequence);
     // 🔒 Lock sur sequence_id au lieu de id
     const { error: lockError } = await supabaseAdmin
       .from("email_sequences")

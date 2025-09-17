@@ -124,5 +124,4 @@ export async function GET() {
     console.error("❌ Cron error:", err.message);
     return new Response(JSON.stringify({ ok: false, error: err.message }), { status: 500 });
   }
-}63
-66
+}
