@@ -73,7 +73,7 @@ async function processOnce(batchSize = 50) {
     }
 
     const { data: recipients, error: recError } = await supabaseAdmin
-      .from("sequence_recipients")
+      .from("email_sequences")
       .select("to_email")
       .eq("sequence_id", sequence.sequence_id);
 
