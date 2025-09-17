@@ -14,7 +14,7 @@ const supabaseAdmin = createClient(
 
 // --- Utils ---
 function calculateNextDateUTC(current, recurrence) {
-  const d = new Date(current); // current est déjà en UTC
+  const d = new Date(current);
   switch (recurrence) {
     case "daily":   d.setUTCDate(d.getUTCDate() + 1); break;
     case "weekly":  d.setUTCDate(d.getUTCDate() + 7); break;
@@ -58,27 +58,27 @@ async function processOnce(batchSize = 50) {
   let sentCount = 0;
 
   for (const sequence of sequences) {
-    console.log("➡️ Processing sequence:", sequence.id, sequence.subject);
+    console.log("➡️ Processing sequence:", sequence.sequence_id, sequence.subject);
 
     // Lock sequence
     const { error: lockError } = await supabaseAdmin
       .from("email_sequences")
       .update({ status: "sending" })
-      .eq("id", sequence.id)
+      .eq("sequence_id", sequence.sequence_id)
       .eq("status", "pending");
 
     if (lockError) {
-      console.warn("⚠️ Could not lock sequence:", sequence.id, lockError.message);
+      console.warn("⚠️ Could not lock sequence:", sequence.sequence_id, lockError.message);
       continue;
     }
 
     const { data: recipients, error: recError } = await supabaseAdmin
       .from("sequence_recipients")
       .select("to_email")
-      .eq("sequence_id", sequence.id);
+      .eq("sequence_id", sequence.sequence_id);
 
     if (recError || !recipients?.length) {
-      console.warn("⚠️ No recipients or fetch error for:", sequence.id);
+      console.warn("⚠️ No recipients or fetch error for:", sequence.sequence_id);
       continue;
     }
 
@@ -93,7 +93,15 @@ async function processOnce(batchSize = 50) {
 
         const { data: inserted, error: insErr } = await supabaseAdmin
           .from("emails_sent")
-          .insert({ sequence_id: sequence.id, to_email: to })
+          .insert({
+            sequence_id: sequence.sequence_id,
+            to_email: to,
+            sent_at: new Date().toISOString(),
+            opened: false,
+            clicked: false,
+            responded: false,
+            variant: "A"
+          })
           .select()
           .single();
 
@@ -101,9 +109,10 @@ async function processOnce(batchSize = 50) {
           console.warn("⚠️ Failed to log email for:", to, insErr?.message);
           return;
         }
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-const pixelUrl = `${process.env.NEXT_PUBLIC_SITE_URL}/api/open?id=${inserted.id}`;
-        const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" />`;
+
+        const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+        const pixelUrl = `${BASE_URL}/api/open?id=${inserted.id}`;
+        const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" style="display:none;" />`;
 
         try {
           const info = await transporter.sendMail({
@@ -126,20 +135,20 @@ const pixelUrl = `${process.env.NEXT_PUBLIC_SITE_URL}/api/open?id=${inserted.id}
     if (sequence.recurrence === "once") {
       await supabaseAdmin.from("email_sequences")
         .update({ status: "completed" })
-        .eq("id", sequence.id);
-      console.log("🟢 Sequence completed:", sequence.id);
+        .eq("sequence_id", sequence.sequence_id);
+      console.log("🟢 Sequence completed:", sequence.sequence_id);
     } else {
       const nextDate = calculateNextDateUTC(sequence.scheduled_at, sequence.recurrence);
       if (nextDate) {
         await supabaseAdmin.from("email_sequences")
           .update({ scheduled_at: nextDate, status: "pending" })
-          .eq("id", sequence.id);
+          .eq("sequence_id", sequence.sequence_id);
         console.log("🌀 Sequence rescheduled:", nextDate);
       }
     }
   }
 
-  console.log("📈 CRON END, total emails sent:", sentCount);
+  console.log("📈 CRON END test ahhhh, total emails sent:", sentCount);
   return { sent: sentCount };
 }
 
@@ -176,27 +185,22 @@ app.get("/testmail", async (req, res) => {
   }
 });
 
-// --- Start server ---
+// --- Pixel route ---
 app.get("/api/open", async (req, res) => {
   const id = req.query.id;
-
-  if (!id) {
-    return res.status(400).send("Missing email id");
-  }
+  if (!id) return res.status(400).send("Missing email id");
 
   try {
-    // Mettre à jour l'email comme ouvert
     const { error } = await supabaseAdmin
       .from("emails_sent")
       .update({ opened: true })
-      .eq("id", id);
+      .eq("sequence_id", sequence.sequence_id);
 
     if (error) {
       console.error("❌ Error updating opened:", error.message);
       return res.status(500).send("DB error");
     }
 
-    // Envoyer un pixel transparent
     res.set("Content-Type", "image/png");
     const pixel = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8HwQACfsD/QkEZHcAAAAASUVORK5CYII=",
@@ -209,4 +213,5 @@ app.get("/api/open", async (req, res) => {
   }
 });
 
+// --- Start server ---
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
