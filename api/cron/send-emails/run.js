@@ -9,10 +9,10 @@ const supabaseAdmin = createClient(
 function calculateNextDate(current, recurrence) {
   const d = new Date(current);
   switch (recurrence) {
-    case "daily": d.setUTCDate(d.getUTCDate() + 1); break;
-    case "weekly": d.setUTCDate(d.getUTCDate() + 7); break;
+    case "daily":   d.setUTCDate(d.getUTCDate() + 1); break;
+    case "weekly":  d.setUTCDate(d.getUTCDate() + 7); break;
     case "monthly": d.setUTCMonth(d.getUTCMonth() + 1); break;
-    case "yearly": d.setUTCFullYear(d.getUTCFullYear() + 1); break;
+    case "yearly":  d.setUTCFullYear(d.getUTCFullYear() + 1); break;
     default: return null;
   }
   return d.toISOString();
@@ -23,7 +23,7 @@ function buildTransporter() {
     service: "gmail",
     auth: { 
       user: process.env.FROM_EMAIL, 
-      pass: process.env.EMAIL_PASS 
+      pass: process.env.EMAIL_PASS
     },
   });
 }
@@ -32,7 +32,7 @@ export async function GET() {
   try {
     const now = new Date().toISOString();
 
-    // 👉 Récupérer les séquences prêtes
+    // Récupérer les séquences prêtes
     const { data: sequences, error: seqErr } = await supabaseAdmin
       .from("email_sequences")
       .select("*")
@@ -47,23 +47,26 @@ export async function GET() {
     const transporter = buildTransporter();
     let sentCount = 0;
 
-    for (const sequence of sequences) { 
+    for (const sequence of sequences) {
       console.log("➡️ Processing sequence:", sequence.sequence_id);
 
-      // 👉 Récupérer les destinataires
+      // Destinataires
       const { data: recipients, error: recErr } = await supabaseAdmin
         .from("sequence_recipients")
         .select("to_email")
         .eq("sequence_id", sequence.sequence_id);
 
-      if (recErr) throw new Error(recErr.message);
+      if (recErr) {
+        console.error("❌ Fetch recipients error:", recErr.message);
+        continue;
+      }
       if (!recipients?.length) continue;
 
       for (const r of recipients) {
         const to = r.to_email;
         if (!to?.includes("@")) continue;
 
-        // 👉 Insérer l'email dans emails_sent
+        // Insérer l'email dans emails_sent
         const { data: inserted, error: insertErr } = await supabaseAdmin
           .from("emails_sent")
           .insert({
@@ -83,11 +86,11 @@ export async function GET() {
           continue;
         }
 
-        // 👉 Pixel tracker
+        // Pixel tracker
         const pixelUrl = `${process.env.NEXT_PUBLIC_BASE_URL}/api/open?id=${inserted.id}`;
         const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" style="display:none;" />`;
 
-        // 👉 Envoyer le mail
+        // Envoyer le mail
         try {
           await transporter.sendMail({
             from: `"EchoNotes" <${process.env.FROM_EMAIL}>`,
@@ -101,7 +104,7 @@ export async function GET() {
         }
       }
 
-      // 👉 Update récurrence
+      // Update récurrence
       if (sequence.recurrence === "once") {
         await supabaseAdmin
           .from("email_sequences")
