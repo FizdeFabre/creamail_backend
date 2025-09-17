@@ -72,8 +72,9 @@ async function processOnce(batchSize = 50) {
       continue;
     }
 
+    // Récupérer les destinataires (via la table dédiée)
     const { data: recipients, error: recError } = await supabaseAdmin
-      .from("email_sequences")
+      .from("sequence_recipients")
       .select("to_email")
       .eq("sequence_id", sequence.sequence_id);
 
@@ -91,10 +92,12 @@ async function processOnce(batchSize = 50) {
         const to = r.to_email;
         if (!to?.includes("@")) return;
 
+        // Log email envoyé
         const { data: inserted, error: insErr } = await supabaseAdmin
           .from("emails_sent")
           .insert({
             sequence_id: sequence.sequence_id,
+            to_email: to,  // ✅ on enregistre bien l'adresse
             sent_at: new Date().toISOString(),
             opened: false,
             clicked: false,
@@ -147,7 +150,7 @@ async function processOnce(batchSize = 50) {
     }
   }
 
-  console.log("📈 CRON END test ahhhh, total emails sent:", sentCount);
+  console.log("📈 CRON END, total emails sent:", sentCount);
   return { sent: sentCount };
 }
 
@@ -193,7 +196,7 @@ app.get("/api/open", async (req, res) => {
     const { error } = await supabaseAdmin
       .from("emails_sent")
       .update({ opened: true })
-      .eq("sequence_id", sequence.sequence_id);
+      .eq("id", id);  // ✅ update par id unique
 
     if (error) {
       console.error("❌ Error updating opened:", error.message);
