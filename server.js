@@ -133,20 +133,23 @@ async function processOnce(batchSize = 50) {
     }
 
     // Reschedule / complete
-    if (sequence.recurrence === "once") {
-      await supabaseAdmin.from("email_sequences")
-        .update({ status: "completed" })
-        .eq("sequence_id", sequence.sequence_id);
-      console.log("🟢 Sequence completed:", sequence.sequence_id);
-    } else {
-      const nextDate = calculateNextDateUTC(sequence.scheduled_at, sequence.recurrence);
-      if (nextDate) {
-        await supabaseAdmin.from("email_sequences")
-          .update({ scheduled_at: nextDate, status: "pending" })
-          .eq("sequence_id", sequence.sequence_id);
-        console.log("🌀 Sequence rescheduled:", nextDate);
-      }
-    }
+   if (sequence.recurrence === "once") {
+  await supabaseAdmin
+    .from("email_sequences")
+    .update({ status: "completed" })
+    .eq("sequence_id", sequence.sequence_id);
+  console.log("🟢 Sequence completed:", sequence.sequence_id);
+} else {
+  // ✅ On calcule depuis "now", pas depuis l’ancien scheduled_at
+  const nextDate = calculateNextDateUTC(now, sequence.recurrence);
+  if (nextDate) {
+    await supabaseAdmin
+      .from("email_sequences")
+      .update({ scheduled_at: nextDate, status: "pending" })
+      .eq("sequence_id", sequence.sequence_id);
+    console.log(`🌀 Sequence rescheduled for [${sequence.recurrence}] at:`, nextDate);
+  }
+}
   }
 
   console.log("📈 CRON END, total emails sent:", sentCount);
@@ -161,7 +164,7 @@ app.get("/cron/run", async (req, res) => {
   if (key !== CRON_KEY) return res.status(403).json({ ok: false, error: "Forbidden: bad key" });
 
   try {
-    const result = await processOnce();
+    const result = await processOnce(); 
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error("Cron error:", err.message);
