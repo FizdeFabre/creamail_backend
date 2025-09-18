@@ -24,7 +24,7 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx"
-, "api/cron/send-emails/route.js"  ],
+, "api/cron/route.js"  ],
   "exclude": [
     "node_modules",
     ".next",
