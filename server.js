@@ -111,7 +111,7 @@ async function processOnce(batchSize = 50) {
           return;
         }
 
-        const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+        const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL;
         const pixelUrl = `${BASE_URL}/api/open?id=${inserted.id}`;
         const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" style="display:none;" />`;
 
@@ -195,16 +195,12 @@ app.get("/api/open", async (req, res) => {
   if (!id) return res.status(400).send("Missing email id");
 
   try {
-    const { error } = await supabaseAdmin
+    await supabaseAdmin
       .from("emails_sent")
-      .update({ opened: true })
-      .eq("id", id);  // ✅ update par id unique
+      .update({ opened: true, opened_at: new Date().toISOString() })
+      .eq("id", id)
 
-    if (error) {
-      console.error("❌ Error updating opened:", error.message);
-      return res.status(500).send("DB error");
-    }
-
+    // Envoi du pixel 1x1 transparent
     res.set("Content-Type", "image/png");
     const pixel = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8HwQACfsD/QkEZHcAAAAASUVORK5CYII=",
