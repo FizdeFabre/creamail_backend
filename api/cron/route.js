@@ -50,7 +50,7 @@ export async function GET() {
     for (const sequence of sequences) {
       console.log("➡️ Processing sequence:", sequence.sequence_id);
 
-      // Destinataires
+      // Récupérer les destinataires
       const { data: recipients, error: recErr } = await supabaseAdmin
         .from("sequence_recipients")
         .select("to_email")
@@ -66,41 +66,55 @@ export async function GET() {
         const to = r.to_email;
         if (!to?.includes("@")) continue;
 
-        // Insérer l'email dans emails_sent
-        const { data: inserted, error: insertErr } = await supabaseAdmin
-          .from("emails_sent")
-          .insert({
-            sequence_id: sequence.sequence_id,
-            to_email: to,
-            sent_at: new Date().toISOString(),
-            opened: false,
-            clicked: false,
-            responded: false,
-            variant: "A"
-          })
-          .select()
-          .single();
+        // Pixel URL
+        const htmlPixel = async (insertedId, body) => {
+          const pixelUrl = `${process.env.NEXT_PUBLIC_BASE_URL}/api/open?id=${insertedId}`;
+          return `${body}<br><img src="${pixelUrl}" width="1" height="1" style="display:none;" />`;
+        };
 
-        if (insertErr) {
-          console.error("❌ Insert failed:", insertErr.message);
-          continue;
-        }
-
-        // Pixel tracker
-        const pixelUrl = `${process.env.NEXT_PUBLIC_BASE_URL}/api/open?id=${inserted.id}`;
-        const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" style="display:none;" />`;
-
-        // Envoyer le mail
         try {
+          // Envoyer le mail
+          const info = await transporter.sendMail({
+            from: `"EchoNotes" <${process.env.FROM_EMAIL}>`,
+            to,
+            subject: sequence.subject,
+            html: sequence.body // on met le pixel après l'insertion dans emails_sent
+          });
+
+          // Insérer l'email dans emails_sent **après envoi**
+          const { data: inserted, error: insertErr } = await supabaseAdmin
+            .from("emails_sent")
+            .insert({
+              sequence_id: sequence.sequence_id,
+              to_email: to,
+              sent_at: new Date().toISOString(),
+              opened: false,
+              clicked: false,
+              responded: false,
+              variant: "A"
+            })
+            .select()
+            .single();
+
+          if (insertErr) {
+            console.error("❌ Failed to log email:", insertErr.message);
+            continue;
+          }
+
+          // Ajouter le pixel dans l'email envoyé
+          const htmlWithPixel = await htmlPixel(inserted.id, sequence.body);
           await transporter.sendMail({
             from: `"EchoNotes" <${process.env.FROM_EMAIL}>`,
             to,
             subject: sequence.subject,
-            html,
+            html: htmlWithPixel
           });
+
           sentCount++;
+          console.log("✅ Mail sent:", info.messageId);
+
         } catch (e) {
-          console.error("Mail error:", e.message);
+          console.error("❌ Mail send error to", to, e?.message);
         }
       }
 
@@ -121,17 +135,35 @@ export async function GET() {
       }
     }
 
-    const { data, error } = await supabaseAdmin
-  .from("email_sequences")
-  .select("*")
-  .limit(1);
-
-console.log(data, error);
-
-    console.log("📈 CRON END TEST GROS FILS DE PUTE, total emails sent:", sentCount);
+    console.log("📈 CRON END, total emails sent:", sentCount);
     return new Response(JSON.stringify({ ok: true, sent: sentCount }), { status: 200 });
+
   } catch (err) {
     console.error("❌ Cron error:", err.message);
     return new Response(JSON.stringify({ ok: false, error: err.message }), { status: 500 });
+  }
+}
+
+// --- Pixel API ---
+export async function GET_OPEN(req, res) {
+  const id = req.query.id;
+  if (!id) return res.status(400).send("Missing email id");
+
+  try {
+    await supabaseAdmin
+      .from("emails_sent")
+      .update({ opened: true, opened_at: new Date().toISOString() })
+      .eq("id", id);
+
+    res.setHeader("Content-Type", "image/png");
+    const pixel = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8HwQACfsD/QkEZHcAAAAASUVORK5CYII=",
+      "base64"
+    );
+    res.send(pixel);
+
+  } catch (e) {
+    console.error("❌ Pixel route error:", e.message);
+    res.status(500).send("Server error");
   }
 }

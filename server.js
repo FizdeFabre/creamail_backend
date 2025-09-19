@@ -116,17 +116,34 @@ async function processOnce(batchSize = 50) {
         const html = `${sequence.body}<br><img src="${pixelUrl}" width="1" height="1" style="display:none;" />`;
 
         try {
-          const info = await transporter.sendMail({
-            from: `"EchoNotes" <${process.env.FROM_EMAIL}>`,
-            to,
-            subject: sequence.subject,
-            html,
-          });
-          console.log("✅ Mail sent:", info.messageId);
-          sentCount++;
-        } catch (e) {
-          console.error("❌ Mail send error to", to, e?.message);
-        }
+  const info = await transporter.sendMail({
+    from: `"EchoNotes" <${process.env.FROM_EMAIL}>`,
+    to,
+    subject: sequence.subject,
+    html,
+  });
+
+  console.log("✅ Mail sent:", info.messageId);
+  sentCount++;
+
+  // Log email envoyé uniquement si succès
+  const { error: insErr } = await supabaseAdmin
+    .from("emails_sent")
+    .insert({
+      sequence_id: sequence.sequence_id,
+      to_email: to,
+      sent_at: new Date().toISOString(),
+      opened: false,
+      clicked: false,
+      responded: false,
+      variant: "A"
+    });
+
+  if (insErr) console.warn("⚠️ Failed to log email for:", to, insErr?.message);
+
+} catch (e) {
+  console.error("❌ Mail send error to", to, e?.message);
+}
       }));
 
       await new Promise(r => setTimeout(r, 200)); // anti-spam
